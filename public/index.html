@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>reMarkable Real-time Canvas</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            background: #f0f0f0;
+        }
+        #toolbar {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            background: #333;
+            color: white;
+            padding: 10px;
+            display: flex;
+            gap: 15px;
+            align-items: center;
+            z-index: 1000;
+        }
+        #toolbar label {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        #status {
+            margin-left: auto;
+            padding: 5px 10px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        #status.connected {
+            background: #4CAF50;
+        }
+        #status.disconnected {
+            background: #f44336;
+        }
+        #canvas-container {
+            position: absolute;
+            top: 50px;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            overflow: auto;
+        }
+        #canvas {
+            background: white;
+            cursor: crosshair;
+            box-shadow: 0 0 10px rgba(0,0,0,0.1);
+        }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            cursor: pointer;
+            border-radius: 3px;
+        }
+        button:hover {
+            background: #45a049;
+        }
+        input[type="color"] {
+            width: 40px;
+            height: 30px;
+            border: none;
+            cursor: pointer;
+        }
+        input[type="range"] {
+            width: 100px;
+        }
+    </style>
+</head>
+<body>
+    <div id="toolbar">
+        <h3>reMarkable Canvas</h3>
+        <label>
+            Color:
+            <input type="color" id="color" value="#000000">
+        </label>
+        <label>
+            Width:
+            <input type="range" id="width" min="1" max="20" value="2">
+            <span id="width-value">2</span>px
+        </label>
+        <button id="clear">Clear Canvas</button>
+        <label>
+            <input type="checkbox" id="show-remote" checked>
+            Show Remote Strokes
+        </label>
+        <div id="status" class="disconnected">Disconnected</div>
+    </div>
+    <div id="canvas-container">
+        <canvas id="canvas" width="3000" height="3000"></canvas>
+    </div>
+
+    <script src="client.js"></script>
+</body>
+</html>
