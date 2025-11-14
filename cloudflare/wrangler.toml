@@ -1,0 +1,32 @@
+name = "remarkable-canvas"
+main = "worker.js"
+compatibility_date = "2024-01-01"
+node_compat = true
+
+# Durable Objects configuration
+[[durable_objects.bindings]]
+name = "CANVAS_ROOM"
+class_name = "CanvasRoom"
+script_name = "remarkable-canvas"
+
+# Durable Object migrations
+[[migrations]]
+tag = "v1"
+new_classes = ["CanvasRoom"]
+
+# Account ID - set via environment variable or wrangler login
+# account_id = "your-account-id"
+
+# Route configuration for production
+# Uncomment and configure for custom domain
+# routes = [
+#   { pattern = "canvas.yourdomain.com/*", zone_name = "yourdomain.com" }
+# ]
+
+# Workers Site configuration (if needed for static assets)
+# [site]
+# bucket = "./public"
+
+# Environment variables (optional)
+# [vars]
+# ENVIRONMENT = "production"

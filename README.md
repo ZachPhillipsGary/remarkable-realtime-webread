@@ -187,6 +187,84 @@ For reMarkable to connect to your server:
    - Find your computer's IP: `ifconfig` or `ipconfig`
    - Use that IP on reMarkable: `./remarkable-canvas -s ws://192.168.1.100:8080`
 
+## Production Deployment
+
+### Cloudflare Workers (Recommended)
+
+Deploy to Cloudflare's global edge network for zero-maintenance, auto-scaling WebSocket server:
+
+#### Quick Deploy
+
+```bash
+cd cloudflare
+./deploy.sh
+```
+
+Your canvas will be live at `https://remarkable-canvas.workers.dev`
+
+#### Using Terraform
+
+For infrastructure-as-code deployment:
+
+```bash
+cd terraform
+
+# Configure credentials
+cp terraform.tfvars.example terraform.tfvars
+# Edit terraform.tfvars with your Cloudflare account ID
+export CLOUDFLARE_API_TOKEN="your-api-token"
+
+# Deploy
+./deploy.sh
+```
+
+#### Features
+- ✅ Global edge deployment (low latency worldwide)
+- ✅ Auto-scaling (handles unlimited connections)
+- ✅ Zero server maintenance
+- ✅ Free tier: 100,000 requests/day
+- ✅ Durable Objects for state management
+- ✅ Built-in SSL/TLS
+
+See [cloudflare/README.md](cloudflare/README.md) for detailed documentation.
+
+### Self-Hosted
+
+Run on your own server:
+
+```bash
+# Using Node.js directly
+npm install
+PORT=8080 node server/index.js
+
+# Using Docker
+docker build -t remarkable-canvas-server .
+docker run -p 8080:8080 remarkable-canvas-server
+
+# Using PM2 (production)
+npm install -g pm2
+pm2 start server/index.js --name remarkable-canvas
+pm2 save
+pm2 startup
+```
+
+### GitHub Releases
+
+Automated releases are created on tag push:
+
+```bash
+# Create a release
+git tag -a v1.0.0 -m "Release v1.0.0"
+git push origin v1.0.0
+
+# GitHub Actions will:
+# - Build reMarkable binaries (armv7)
+# - Create release with downloadable assets
+# - Build and push Docker image to GHCR
+```
+
+Download pre-built binaries from [Releases](../../releases).
+
 ## Protocol
 
 The application uses a simple JSON protocol over WebSockets:
@@ -225,7 +303,7 @@ The application uses a simple JSON protocol over WebSockets:
 ```
 .
 ├── server/
-│   └── index.js              # WebSocket server
+│   └── index.js              # WebSocket server (Node.js)
 ├── public/
 │   ├── index.html            # Web client UI
 │   └── client.js             # Web client logic
@@ -234,6 +312,20 @@ The application uses a simple JSON protocol over WebSockets:
 │   ├── main.cpp              # Entry point
 │   ├── canvaswidget.h/cpp    # Canvas widget
 │   └── websocketclient.h/cpp # WebSocket client
+├── cloudflare/
+│   ├── worker.js             # Cloudflare Worker with Durable Objects
+│   ├── wrangler.toml         # Wrangler configuration
+│   ├── deploy.sh             # Deployment script
+│   └── README.md             # Cloudflare deployment docs
+├── terraform/
+│   ├── main.tf               # Terraform configuration
+│   ├── terraform.tfvars.example # Configuration template
+│   ├── deploy.sh             # Terraform deployment script
+│   └── README.md             # Terraform deployment docs
+├── .github/
+│   └── workflows/
+│       ├── build-release.yml # Build and release automation
+│       └── deploy-cloudflare.yml # Auto-deploy to Cloudflare
 ├── Dockerfile                # Cross-compilation environment
 ├── Makefile                  # Build automation
 └── package.json              # Node.js dependencies

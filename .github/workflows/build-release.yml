@@ -1,0 +1,195 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version tag (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build-remarkable:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: armv7
+            target: arm-oe-linux-gnueabi
+            device: "reMarkable 1/2"
+            toolchain_url: "https://remarkable.engineering/oecore-x86_64-cortexa7hf-neon-toolchain-zero-gravitas-1.8-23.9.2019.sh"
+            env_setup: "environment-setup-cortexa9hf-neon-oe-linux-gnueabi"
+          # Uncomment when reMarkable Paper Pro toolchain is available
+          # - arch: aarch64
+          #   target: aarch64-oe-linux
+          #   device: "reMarkable Paper Pro"
+          #   toolchain_url: "https://remarkable.engineering/oecore-x86_64-aarch64-toolchain-xxx.sh"
+          #   env_setup: "environment-setup-aarch64-oe-linux"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache toolchain
+        id: cache-toolchain
+        uses: actions/cache@v3
+        with:
+          path: /opt/remarkable-toolchain
+          key: ${{ runner.os }}-remarkable-toolchain-${{ matrix.arch }}-${{ hashFiles('.github/workflows/build-release.yml') }}
+
+      - name: Download and install toolchain
+        if: steps.cache-toolchain.outputs.cache-hit != 'true'
+        run: |
+          wget ${{ matrix.toolchain_url }} -O /tmp/toolchain.sh
+          chmod +x /tmp/toolchain.sh
+          sudo /tmp/toolchain.sh -y -d /opt/remarkable-toolchain
+          rm /tmp/toolchain.sh
+
+      - name: Build reMarkable application
+        run: |
+          source /opt/remarkable-toolchain/${{ matrix.env_setup }}
+          mkdir -p build-${{ matrix.arch }}
+          cd build-${{ matrix.arch }}
+          qmake ../remarkable-client/remarkable-canvas.pro
+          make -j$(nproc)
+
+      - name: Package binary
+        run: |
+          mkdir -p release
+          cp build-${{ matrix.arch }}/remarkable-canvas release/remarkable-canvas-${{ matrix.arch }}
+          cd release
+          tar -czf remarkable-canvas-${{ matrix.arch }}.tar.gz remarkable-canvas-${{ matrix.arch }}
+          sha256sum remarkable-canvas-${{ matrix.arch }}.tar.gz > remarkable-canvas-${{ matrix.arch }}.tar.gz.sha256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: remarkable-canvas-${{ matrix.arch }}
+          path: |
+            release/remarkable-canvas-${{ matrix.arch }}.tar.gz
+            release/remarkable-canvas-${{ matrix.arch }}.tar.gz.sha256
+
+  create-release:
+    needs: build-remarkable
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: artifacts
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "VERSION=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create release notes
+        run: |
+          cat > RELEASE_NOTES.md << 'EOF'
+          ## reMarkable Real-time Canvas Release
+
+          ### Downloads
+
+          - **reMarkable 1/2** (armv7): Download `remarkable-canvas-armv7.tar.gz`
+
+          ### Installation
+
+          1. Download the appropriate binary for your device
+          2. Verify checksum: `sha256sum -c remarkable-canvas-*.tar.gz.sha256`
+          3. Extract: `tar -xzf remarkable-canvas-*.tar.gz`
+          4. Copy to reMarkable:
+             ```bash
+             scp remarkable-canvas-armv7 root@10.11.99.1:/home/root/remarkable-canvas
+             ```
+          5. SSH into reMarkable and run:
+             ```bash
+             chmod +x /home/root/remarkable-canvas
+             ./remarkable-canvas -s ws://YOUR_SERVER:8080
+             ```
+
+          ### Server Deployment
+
+          Deploy the WebSocket server using one of these methods:
+
+          - **Cloudflare Workers**: See `cloudflare/README.md`
+          - **Self-hosted**: Run `npm start` in the server directory
+          - **Docker**: `docker-compose up`
+
+          ### Changelog
+
+          See [CHANGELOG.md](CHANGELOG.md) for details.
+          EOF
+
+      - name: Consolidate artifacts
+        run: |
+          mkdir -p release
+          find artifacts -name "*.tar.gz*" -exec cp {} release/ \;
+          ls -lah release/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          files: |
+            release/*.tar.gz
+            release/*.sha256
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-docker-image:
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

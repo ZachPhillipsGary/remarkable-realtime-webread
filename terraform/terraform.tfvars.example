@@ -1,0 +1,31 @@
+# Cloudflare Account ID (required)
+# Find this in your Cloudflare dashboard under Account Home
+cloudflare_account_id = "your-account-id-here"
+
+# Cloudflare Zone ID (optional, only needed for custom domain)
+# Find this in your domain's Overview page
+cloudflare_zone_id = "your-zone-id-here"
+
+# Worker name (optional, defaults to "remarkable-canvas")
+worker_name = "remarkable-canvas"
+
+# Custom domain (optional)
+# Leave empty to use workers.dev subdomain
+domain_name = "example.com"
+
+# Subdomain (optional, defaults to "canvas")
+subdomain = "canvas"
+
+# Example configurations:
+#
+# 1. Using workers.dev only:
+#    cloudflare_account_id = "abc123..."
+#    domain_name = ""
+#    Result: https://remarkable-canvas.workers.dev
+#
+# 2. Using custom domain:
+#    cloudflare_account_id = "abc123..."
+#    cloudflare_zone_id = "xyz789..."
+#    domain_name = "example.com"
+#    subdomain = "canvas"
+#    Result: https://canvas.example.com
