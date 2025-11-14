@@ -4,12 +4,39 @@ A proof-of-concept real-time collaborative canvas application that enables live 
 
 ## Features
 
+### Core Functionality
 - **Real-time Synchronization**: Draw on reMarkable or web browser and see updates instantly on all connected clients
-- **Infinite Canvas**: Large canvas (3000x3000px) for extensive drawing space
+- **Large Canvas**: 3000x3000px canvas for extensive drawing space with scroll support
 - **Multi-client Support**: Multiple web browsers and reMarkable devices can connect simultaneously
-- **Auto-reconnect**: Automatic reconnection when network connection is lost
-- **Canvas History**: New clients receive existing canvas state on connection
+- **Auto-reconnect**: Automatic reconnection when network connection is lost (3-second intervals)
+- **Canvas History**: New clients receive existing canvas state on connection (up to 1000 elements)
 - **Touch & Stylus Support**: Full support for reMarkable pen input and web touch events
+
+### Web Client Features
+- **Color Picker**: Full spectrum color selection with visual color display
+- **Adjustable Brush Width**: Slider control (1-20px) with live value indicator
+- **Clear Canvas**: Button to clear entire canvas and broadcast to all clients
+- **Remote Strokes Toggle**: Checkbox to show/hide strokes from other clients
+- **Connection Status**: Visual indicator showing real-time connection state (green/red)
+- **Touch-Optimized**: Prevents default touch behavior for smooth mobile drawing
+- **Responsive UI**: Dark toolbar with hover effects and crosshair cursor
+
+### reMarkable Client Features
+- **Command-line Configuration**: `--server` / `-s` option to specify WebSocket server URL
+- **Connection Indicator**: Visual status circle (green/red) in top-right corner
+- **Optimized Rendering**: Dirty rectangle updates for efficient e-ink refresh
+- **Full-screen Mode**: Maximizes drawing space on reMarkable display
+- **Default Pen Settings**: Black color, 2px width with round line caps
+
+### Server Features
+- **Health Check Endpoint**: `/health` endpoint showing server status, connected clients, and history size
+- **Canvas History Management**: FIFO queue storing last 1000 canvas elements
+- **Smart Broadcasting**: Messages not echoed back to originating client
+- **Message Types**: Full support for stroke, clear, image*, and text* events
+- **Configurable Port**: Environment variable PORT configuration (default: 8080)
+- **Network Accessible**: Listens on 0.0.0.0 for WiFi and USB connections
+
+*Note: Image and text message types are supported by server infrastructure but not yet rendered by clients
 
 ## Architecture
 
@@ -161,8 +188,15 @@ make
 # Start server on custom port
 PORT=3000 npm start
 
-# View server status
+# View server status and connected clients
 curl http://localhost:8080/health
+
+# Example health check response:
+# {
+#   "status": "ok",
+#   "clients": 3,
+#   "historySize": 42
+# }
 ```
 
 ### reMarkable Client Options
@@ -170,10 +204,43 @@ curl http://localhost:8080/health
 ```bash
 # Specify WebSocket server URL
 ./remarkable-canvas -s ws://192.168.1.100:8080
+./remarkable-canvas --server ws://192.168.1.100:8080
 
 # Show help
 ./remarkable-canvas --help
+
+# Show version
+./remarkable-canvas --version
 ```
+
+### Build System (Makefile)
+
+The project includes a comprehensive Makefile with multiple targets:
+
+```bash
+# Display all available commands
+make help
+
+# Build commands
+make build-docker          # Build Docker image with reMarkable toolchain
+make build-remarkable      # Cross-compile Qt application
+make build-server          # Install Node.js dependencies
+
+# Run commands
+make run-server           # Start WebSocket server
+
+# Deployment
+make deploy REMARKABLE_IP=10.11.99.1  # Deploy to reMarkable via SCP
+
+# Maintenance
+make clean                # Remove build artifacts and node_modules
+make quickstart           # Display quick start guide
+```
+
+**Configurable Variables:**
+- `REMARKABLE_IP` - Target reMarkable IP address (default: 10.11.99.1)
+- `SERVER_PORT` - WebSocket server port (default: 8080)
+- `DOCKER_IMAGE` - Docker image name (default: remarkable-canvas-build)
 
 ### Network Configuration
 
@@ -189,9 +256,9 @@ For reMarkable to connect to your server:
 
 ## Protocol
 
-The application uses a simple JSON protocol over WebSockets:
+The application uses a simple JSON protocol over WebSockets. All messages include timestamps in milliseconds since epoch.
 
-### Stroke Event
+### Stroke Event (client → server → broadcast)
 ```json
 {
   "type": "stroke",
@@ -201,24 +268,113 @@ The application uses a simple JSON protocol over WebSockets:
   "timestamp": 1234567890
 }
 ```
+- Sent when a complete stroke is finished (mouseup/touchend)
+- Server broadcasts to all clients except sender
+- Automatically added to canvas history
 
-### Clear Event
+### Clear Event (client → server → broadcast)
 ```json
 {
   "type": "clear",
   "timestamp": 1234567890
 }
 ```
+- Clears entire canvas for all connected clients
+- Removes all elements from server history
 
 ### History Event (server → client on connect)
 ```json
 {
   "type": "history",
-  "data": [/* array of stroke/image/text events */]
+  "data": [
+    {"type": "stroke", "points": [...], "color": "#000000", "width": 2, "timestamp": 1234567890},
+    {"type": "stroke", "points": [...], "color": "#ff0000", "width": 5, "timestamp": 1234567891}
+  ]
 }
 ```
+- Sent automatically when a new client connects
+- Contains up to 1000 most recent canvas elements (FIFO queue)
+- Allows new clients to see existing canvas content
+
+### Image Event* (infrastructure only)
+```json
+{
+  "type": "image",
+  "data": "base64-encoded-image-data",
+  "position": {"x": 100, "y": 100},
+  "timestamp": 1234567890
+}
+```
+*Server accepts and stores in history, but clients don't render yet
+
+### Text Event* (infrastructure only)
+```json
+{
+  "type": "text",
+  "content": "Hello, world!",
+  "position": {"x": 100, "y": 100},
+  "font": "Arial",
+  "size": 14,
+  "timestamp": 1234567890
+}
+```
+*Server accepts and stores in history, but clients don't render yet
 
 ## Development
+
+### Technical Implementation Details
+
+**Canvas Configuration:**
+- **Size**: 3000x3000 pixels (both web and reMarkable clients)
+- **Format**: RGB32 for reMarkable (Qt), 2d context for web
+- **Rendering**: Immediate local draw + remote broadcast on stroke completion
+
+**Drawing Implementation:**
+- **Stroke Collection**: Points collected during mouse/touch movement
+- **Stroke Transmission**: Full stroke sent on mouseup/touchend (not per-point)
+- **Line Style**: Round caps and round joins for smooth appearance
+- **Default Settings**: Black color (#000000), 2px width
+
+**Network Protocol:**
+- **WebSocket Library**: `ws` v8.14.2 (Node.js server), Qt WebSockets (reMarkable)
+- **Message Format**: JSON with type, data, and timestamp fields
+- **Broadcasting**: Server sends to all clients except message originator
+- **Reconnection**: 3-second timer on both web and reMarkable clients
+- **History Transfer**: Complete on every successful connection
+
+**Performance Optimizations:**
+- **Dirty Rectangle Updates**: reMarkable only repaints changed areas
+- **Static Contents Flag**: Qt optimization for reduced redraws
+- **History Limit**: FIFO queue capped at 1000 elements to prevent memory growth
+- **Touch Prevention**: Web client prevents default touch behavior for better performance
+
+**Build System:**
+- **Toolchain**: Zero Gravitas 1.8-23.9.2019 (armv7 for reMarkable 1/2)
+- **Cross-compilation**: Docker container with Qt 5.x and armv7 toolchain
+- **Target Architecture**: cortexa9hf-neon-oe-linux-gnueabi
+- **Deployment**: SCP over SSH to /home/root on reMarkable
+
+### Web Client UI Guide
+
+The web interface (`http://localhost:8080`) provides a full-featured drawing experience:
+
+**Toolbar Controls (top of page):**
+- **Color Picker**: Click the color input to select any color from the spectrum
+- **Brush Width Slider**: Adjust from 1-20px (current value displayed next to slider)
+- **Clear Canvas Button**: Removes all strokes for all connected clients
+- **Show Remote Strokes**: Toggle checkbox to hide/show drawings from other users
+- **Connection Status**: Real-time indicator (🟢 Connected / 🔴 Disconnected)
+
+**Canvas Interaction:**
+- **Drawing**: Click/tap and drag to draw
+- **Multi-touch**: Prevent default touch behavior for smooth mobile drawing
+- **Scroll**: Large 3000x3000px canvas with automatic scroll support
+- **Cursor**: Crosshair cursor for precise drawing
+
+**Connection Behavior:**
+- Auto-connect on page load to `ws://[current-host]:8080`
+- Auto-reconnect every 3 seconds if connection drops
+- Canvas history automatically loaded on successful connection
 
 ### Project Structure
 
@@ -241,17 +397,43 @@ The application uses a simple JSON protocol over WebSockets:
 
 ### Extending the Application
 
-#### Adding Image Support
+#### Adding Image Support (Client Rendering)
 
-1. Update protocol to include `image` type
-2. Add image rendering in both clients
-3. Handle base64 encoding/decoding
+The server already accepts and stores image events in history. To complete the feature:
 
-#### Adding Text Support
+1. **Web Client** (`public/client.js`):
+   - Add handler for `message.type === 'image'`
+   - Decode base64 image data
+   - Draw image to canvas at specified position using `ctx.drawImage()`
 
-1. Update protocol to include `text` type with position and content
-2. Add text rendering in CanvasWidget and web client
-3. Add text input UI
+2. **reMarkable Client** (`canvaswidget.cpp`):
+   - Add handler in `handleCanvasMessage()` for image type
+   - Decode base64 data using `QByteArray::fromBase64()`
+   - Create QPixmap from data
+   - Draw to canvas using QPainter
+
+3. **UI for Image Upload**:
+   - Add file input in web client
+   - Convert uploaded image to base64
+   - Send image event with position data
+
+#### Adding Text Support (Client Rendering)
+
+The server already accepts and stores text events in history. To complete the feature:
+
+1. **Web Client** (`public/client.js`):
+   - Add handler for `message.type === 'text'`
+   - Use `ctx.fillText()` or `ctx.strokeText()` to render
+   - Apply font, size, and color from message
+
+2. **reMarkable Client** (`canvaswidget.cpp`):
+   - Add handler in `handleCanvasMessage()` for text type
+   - Use QPainter::drawText() with QFont from message
+   - Position text at specified coordinates
+
+3. **UI for Text Input**:
+   - Add text input field and "Add Text" button
+   - Send text event with content, position, and styling
 
 #### Implementing CRDT
 
@@ -285,18 +467,39 @@ For better conflict resolution in collaborative editing:
 - **E-ink Refresh**: The application uses standard Qt drawing which may not optimize for e-ink refresh rates
 - **Performance**: Large canvases with many strokes may slow down
 - **No Persistence**: Canvas state is lost when server restarts
+- **History Limit**: Server stores only last 1000 canvas elements; older content is lost
+- **Image/Text Support**: Server infrastructure exists but clients don't render images or text yet
 - **reMarkable Paper Pro**: Requires recompilation for aarch64 architecture
+- **No Authentication**: Anyone who can reach the server can draw on the shared canvas
+- **No Undo/Redo**: Once a stroke is drawn, it can only be removed by clearing the entire canvas
 
 ## Future Improvements
 
-- [ ] Implement proper e-ink refresh optimization (DU mode for drawing)
-- [ ] Add persistent storage (database or file-based)
-- [ ] Implement pressure sensitivity from Wacom digitizer
-- [ ] Add eraser tool
-- [ ] Implement pan/zoom for infinite canvas navigation
-- [ ] Add authentication for multi-user scenarios
-- [ ] Support for reMarkable Paper Pro (aarch64)
-- [ ] Offline mode with sync queue
+### High Priority
+- [ ] **Complete Image Support**: Add client-side rendering for images (server infrastructure ready)
+- [ ] **Complete Text Support**: Add client-side rendering for text (server infrastructure ready)
+- [ ] **Undo/Redo**: Implement stroke history with undo/redo capability
+- [ ] **Eraser Tool**: Add ability to remove individual strokes
+
+### Performance & Optimization
+- [ ] **E-ink Refresh Optimization**: Implement DU mode for faster reMarkable drawing
+- [ ] **Persistent Storage**: Save canvas to database or file system for server restarts
+- [ ] **Configurable History Limit**: Allow adjustment of 1000 element limit
+- [ ] **Stroke Compression**: Reduce bandwidth with point simplification algorithms
+
+### Advanced Features
+- [ ] **Pressure Sensitivity**: Implement Wacom digitizer pressure data for variable width strokes
+- [ ] **Pan/Zoom**: Add infinite canvas navigation with touch gestures
+- [ ] **Layers**: Support multiple drawing layers with visibility toggle
+- [ ] **Export**: Save canvas as PNG, SVG, or PDF
+- [ ] **Collaborative Cursors**: Show other users' cursor positions in real-time
+
+### Platform & Architecture
+- [ ] **reMarkable Paper Pro Support**: Add aarch64 compilation support
+- [ ] **Offline Mode**: Queue operations when disconnected and sync on reconnect
+- [ ] **Authentication**: Add user authentication and per-user canvases
+- [ ] **Multiple Rooms**: Support separate collaborative sessions/rooms
+- [ ] **HTTPS/WSS**: Add TLS support for secure connections
 
 ## References
 
